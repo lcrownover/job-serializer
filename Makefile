@@ -1,11 +1,11 @@
 .PHONY: all install clean
 
 all:
-	@go build -o bin/job-serializer-go cmd/job-serializer-go/main.go
+	@go build -o bin/job-serializer cmd/job-serializer/main.go
 
 install:
-	@cp bin/job-serializer-go /usr/local/bin/job-serializer-go
+	@cp bin/job-serializer /usr/local/bin/job-serializer
 
 clean:
-	@rm -f bin/job-serializer-go /usr/local/bin/job-serializer-go
+	@rm -f bin/job-serializer /usr/local/bin/job-serializer
 
