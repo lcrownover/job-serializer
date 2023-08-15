@@ -9,34 +9,177 @@ package main
 //   if it does, skip it
 // else
 //   create a DATE.json file for that day
-//    { "total_jobs": len(files), 
-//      "parsed_jobs": 0, 
+//    { "date": "2021-01-01",
+//      "total_jobs": len(files),
+//      "parsed_jobs": 0,
 //      "jobs": [
-//        {"propOne": "something", "propTwo": "somethingelse"},
+//         {
+//           "job_id": "1234",
+//           "job_name": "job1",
+//           "user_id": "user1",
+//           "group_id": "group1",
+//           "submit_time": "2021-01-01 00:00:00",
+//           "start_time": "2021-01-01 00:00:00",
+//           "end_time": "2021-01-01 00:00:00",
+//           "partition": "partition1",
+//           "num_nodes": "1"
+//         },
 //      ]}
 //   for each file in the directory
-//    parse the file 
+//    parse the file
 //    add the parsed job to the jobs array
 //    increment parsed_jobs
 
 import (
 	"bufio"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
 )
 
+type JobDay struct {
+	Filepath   string `json:"filepath"`
+	Date       string `json:"date"`
+	TotalJobs  int    `json:"total_jobs"`
+	ParsedJobs int    `json:"parsed_jobs"`
+	Jobs       []Job  `json:"jobs"`
+}
+
+func NewJobDay(path string) *JobDay {
+	// get the number of files in the directory
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		writeStderr(err.Error())
+		os.Exit(1)
+	}
+	totalJobs := len(entries)
+	datestamp := strings.Split(path, "/")[len(strings.Split(path, "/"))-1]
+	ymd := convertDatestampToYMD(datestamp)
+	return &JobDay{
+		Filepath:   path,
+		Date:       ymd,
+		TotalJobs:  totalJobs,
+		ParsedJobs: 0,
+		Jobs:       []Job{},
+	}
+}
+
+// Scan the directory for job files
+// If the data.json file exists, check if the total_jobs matches the number of files in the directory
+// If it does, skip it
+// Parse the job files in a waitgroup and add them to the Jobs array
+// Increment the ParsedJobs counter
+func (jd *JobDay) Scan(force bool) {
+	entries, err := os.ReadDir(jd.Filepath)
+	if err != nil {
+		writeStderr(err.Error())
+		os.Exit(1)
+	}
+    // ignore the skip logic if force is used
+	if !force {
+		df, err := os.Open(jd.Filepath + "/data.json")
+		if err != nil {
+			if !os.IsNotExist(err) {
+				writeStderr(err.Error())
+				os.Exit(1)
+			}
+		}
+		if df != nil {
+			defer df.Close()
+			var data JobDay
+			json.NewDecoder(df).Decode(&data)
+			if data.TotalJobs == len(entries) {
+				fmt.Printf("Skipping %s\n", jd.Filepath)
+				return
+			}
+		}
+	}
+
+	fmt.Printf("Parsing %s\n", jd.Filepath)
+	var jobChan = make(chan Job, len(entries))
+	var wg sync.WaitGroup
+	for _, entry := range entries {
+		wg.Add(1)
+		go func(entry os.DirEntry, jobChan chan Job) {
+			defer wg.Done()
+			entrypath := jd.Filepath + "/" + entry.Name()
+			job, err := parseJobFile(entrypath)
+			if err != nil {
+				writeStderr(err.Error())
+				os.Exit(1)
+			}
+			jobChan <- *job
+		}(entry, jobChan)
+	}
+	wg.Wait()
+	close(jobChan)
+	for job := range jobChan {
+		jd.Jobs = append(jd.Jobs, job)
+		jd.ParsedJobs++
+	}
+}
+
+// Write the JobDay struct to a file
+func (jd *JobDay) Write() {
+	datapath := jd.Filepath + "/data.json"
+	file, err := os.Create(datapath)
+	if err != nil {
+		writeStderr(err.Error())
+		os.Exit(1)
+	}
+	defer file.Close()
+	json, err := json.Marshal(jd)
+	if err != nil {
+		writeStderr(err.Error())
+		os.Exit(1)
+	}
+	file.Write(json)
+}
+
 type Job struct {
-	JobId      string `json:"job_id"`
-	JobName    string `json:"job_name"`
-	UserId     string `json:"user_id"`
-	GroupId    string `json:"group_id"`
-	SubmitTime string `json:"submit_time"`
-	StartTime  string `json:"start_time"`
-	EndTime    string `json:"end_time"`
-	Partition  string `json:"partition"`
-	NumNodes   string `json:"num_nodes"`
+	JobId           string `json:"job_id"`
+	JobName         string `json:"job_name"`
+	JobState        string `json:"job_state"`
+	Account         string `json:"account"`
+	UserId          string `json:"user_id"`
+	GroupId         string `json:"group_id"`
+	QOS             string `json:"qos"`
+	Requeue         string `json:"requeue"`
+	Restarts        string `json:"restarts"`
+	BatchFlag       string `json:"batch_flag"`
+	Reboot          string `json:"reboot"`
+	ExitCode        string `json:"exit_code"`
+	DerivedExitCode string `json:"derived_exit_code"`
+	RunTime         string `json:"run_time"`
+	TimeLimit       string `json:"time_limit"`
+	TimeMin         string `json:"time_min"`
+	EligibleTime    string `json:"eligible_time"`
+	AccrueTime      string `json:"accrue_time"`
+	SuspendTime     string `json:"suspend_time"`
+	NodeList        string `json:"node_list"`
+	BatchHost       string `json:"batch_host"`
+	SubmitTime      string `json:"submit_time"`
+	StartTime       string `json:"start_time"`
+	EndTime         string `json:"end_time"`
+	Partition       string `json:"partition"`
+	NumNodes        string `json:"num_nodes"`
+	NumCPUs         string `json:"num_cpus"`
+	NumTasks        string `json:"num_tasks"`
+	TRES            string `json:"tres"`
+	Priority        string `json:"priority"`
+	Reason          string `json:"reason"`
+	MinCPUsNode     string `json:"min_cpus_node"`
+	MinMemoryCPU    string `json:"min_memory_cpu"`
+	Command         string `json:"command"`
+	WorkDir         string `json:"work_dir"`
+	Power           string `json:"power"`
+    ExcNodeList     string `json:"exc_node_list"`
+    StdErr          string `json:"std_err"`
+    StdIn           string `json:"std_in"`
+    StdOut          string `json:"std_out"`
 }
 
 func parseJobFile(filepath string) (*Job, error) {
@@ -65,7 +208,7 @@ func parseJobFileLine(job *Job, line string) Job {
 	line = strings.TrimSpace(line)
 	pairs := strings.Split(line, " ")
 	for _, pair := range pairs {
-		kv := strings.Split(pair, "=")
+		kv := strings.SplitN(pair, "=", 2)
 		switch kv[0] {
 		case "JobId":
 			job.JobId = safeGetProperty(kv)
@@ -85,13 +228,75 @@ func parseJobFileLine(job *Job, line string) Job {
 			job.Partition = safeGetProperty(kv)
 		case "NumNodes":
 			job.NumNodes = safeGetProperty(kv)
+		case "NumCPUs":
+			job.NumCPUs = safeGetProperty(kv)
+		case "NumTasks":
+			job.NumTasks = safeGetProperty(kv)
+		case "TRES":
+			job.TRES = safeGetProperty(kv)
+		case "Priority":
+			job.Priority = safeGetProperty(kv)
+		case "Reason":
+			job.Reason = safeGetProperty(kv)
+		case "MinCPUsNode":
+			job.MinCPUsNode = safeGetProperty(kv)
+		case "MinMemoryCPU":
+			job.MinMemoryCPU = safeGetProperty(kv)
+		case "Command":
+			job.Command = safeGetProperty(kv)
+		case "WorkDir":
+			job.WorkDir = safeGetProperty(kv)
+		case "Power":
+			job.Power = safeGetProperty(kv)
+		case "JobState":
+			job.JobState = safeGetProperty(kv)
+		case "Account":
+			job.Account = safeGetProperty(kv)
+		case "QOS":
+			job.QOS = safeGetProperty(kv)
+		case "Requeue":
+			job.Requeue = safeGetProperty(kv)
+		case "Restarts":
+			job.Restarts = safeGetProperty(kv)
+		case "BatchFlag":
+			job.BatchFlag = safeGetProperty(kv)
+		case "Reboot":
+			job.Reboot = safeGetProperty(kv)
+		case "ExitCode":
+			job.ExitCode = safeGetProperty(kv)
+		case "DerivedExitCode":
+			job.DerivedExitCode = safeGetProperty(kv)
+		case "RunTime":
+			job.RunTime = safeGetProperty(kv)
+		case "TimeLimit":
+			job.TimeLimit = safeGetProperty(kv)
+		case "TimeMin":
+			job.TimeMin = safeGetProperty(kv)
+		case "EligibleTime":
+			job.EligibleTime = safeGetProperty(kv)
+		case "AccrueTime":
+			job.AccrueTime = safeGetProperty(kv)
+		case "SuspendTime":
+			job.SuspendTime = safeGetProperty(kv)
+		case "NodeList":
+			job.NodeList = safeGetProperty(kv)
+		case "BatchHost":
+			job.BatchHost = safeGetProperty(kv)
+        case "StdErr":
+            job.StdErr = safeGetProperty(kv)
+        case "StdIn":
+            job.StdIn = safeGetProperty(kv)
+        case "StdOut":
+            job.StdOut = safeGetProperty(kv)
+        case "ExcNodeList":
+            job.ExcNodeList = safeGetProperty(kv)
 		}
 	}
 	return *job
 }
 
 func writeStderr(msg string) {
-	fmt.Fprintf(os.Stderr, msg)
+	fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
 }
 
 func getJobFilepaths(datepath string) []string {
@@ -106,85 +311,67 @@ func getJobFilepaths(datepath string) []string {
 	return jobFilepaths
 }
 
-func main() {
-	entries, err := os.ReadDir("./")
+func convertDatestampToYMD(datestamp string) string {
+	// datestamp is in the format YYYYMMDD
+	// we want to convert it to YYYY-MM-DD
+	return datestamp[0:4] + "-" + datestamp[4:6] + "-" + datestamp[6:8]
+}
+
+func convertYMDToDatestamp(ymd string) string {
+	// ymd is in the format YYYY-MM-DD
+	// we want to convert it to YYYYMMDD
+	return ymd[0:4] + ymd[5:7] + ymd[8:10]
+}
+
+func getDirPaths(basepath string, ymd string) []string {
+	var validEntries []string
+	entries, err := os.ReadDir(basepath)
 	if err != nil {
-		fmt.Println(err)
+		writeStderr(err.Error())
+		os.Exit(1)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "20") {
+			entryPath := basepath + "/" + entry.Name()
+			if ymd == "" { // we're not looking for a specific datedir
+				validEntries = append(validEntries, entryPath)
+			}
+			if ymd != "" {
+				datestamp := convertYMDToDatestamp(ymd)
+				if strings.Contains(entry.Name(), datestamp) {
+					validEntries = append(validEntries, entryPath)
+				}
+			}
+		}
+	}
+	return validEntries
+}
+
+// returns true if the job has already been parsed successfully into the json file
+func checkCompleted(dirEntry os.DirEntry) bool { return false }
+
+func main() {
+	var basedirFlag = flag.String("basedir", "", "path to directory containing job directories")
+	var dateFlag = flag.String("date", "", "date to parse in the format YYYY-MM-DD")
+	var forceFlag = flag.Bool("force", false, "force re-parsing of jobs")
+	flag.Parse()
+
+	if *basedirFlag == "" {
+		writeStderr("basedir is required")
+		flag.Usage()
 		os.Exit(1)
 	}
 
-    // output structure
-    // {
-    //   "2021": {
-    //     "01": {
-    //       "01": [
-    //         {
-    //           "job_id": "1234",
-    //           "job_name": "job1",
-    //           "user_id": "user1",
-    //           "group_id": "group1",
-    //           "submit_time": "2021-01-01 00:00:00",
-    //           "start_time": "2021-01-01 00:00:00",
-    //           "end_time": "2021-01-01 00:00:00",
-    //           "partition": "partition1",
-    //           "num_nodes": "1"
-    //         },
-    //         {
-    //           "job_id": "1235",
-    //           "job_name": ".......",
-    //         },
-    //       ],
-    //       "02": [
-    //         {more}, 
-    //         {jobs...}
-    //       ],
-    //     },
-    //   "02": {
-    //     "01": [],
-    //     "02": [],
-    //   },
-    //  "2020": {
-    //    "01": {
-    //      "01": [],
-    //      "02": [],
-    //    },
-    //    "02": {
-    //      "01": [],
-    //      "02": [],
-    //    },
-    //  },
+	paths := getDirPaths(*basedirFlag, *dateFlag)
 
-    jobData := make(map[string][]Job, len(entries))
-	jobFilepaths := make(map[string][]string, len(entries))
-
-	var wg sync.WaitGroup
-	for _, entry := range entries {
-        // iterate over DAYS
-		ymdDirName := entry.Name()
-		if !strings.HasPrefix(ymdDirName, "20") {
-            // ignore anything that's not a job dir
-			continue
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-            
-			var filepaths []string
-			fps := getJobFilepaths(ymdDirName)
-
-			filepaths = append(filepaths, fps...)
-            jobFilepaths[ymdDirName] = filepaths
-		}()
-	}
-	fmt.Println("Getting job filepaths...")
-	wg.Wait()
-
-    // can we just dump everything?
-	for ymdStr, jobFilepath := range jobFilepaths {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            
-        }()
+	// this will iterate over the DAY directories in basedir
+	// we iterate through days sequentially,
+	// but we can parse jobs in parallel
+	for _, path := range paths {
+		// entry is a full path to a directory
+		// inside this loop, we waitgroup over all the files in the day
+		jobDay := NewJobDay(path)
+		jobDay.Scan(*forceFlag)
+		jobDay.Write()
 	}
 }
