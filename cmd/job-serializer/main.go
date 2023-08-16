@@ -36,6 +36,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -107,11 +108,16 @@ func (jd *JobDay) Scan(force bool) {
 	}
 
 	fmt.Printf("Parsing %s\n", jd.Filepath)
-	var jobChan = make(chan Job, 8000)
+
+	var jobChan = make(chan Job, len(entries))
+    var queueChan = make(chan struct{}, 1000)
+
 	var wg sync.WaitGroup
 	for _, entry := range entries {
+        fmt.Println(runtime.NumGoroutine())
+        queueChan <- struct{}{}
 		wg.Add(1)
-		go func(entry os.DirEntry, jobChan chan Job) {
+		go func(entry os.DirEntry, jobChan chan Job, queueChan chan struct{}) {
 			defer wg.Done()
 			entrypath := jd.Filepath + "/" + entry.Name()
 			job, err := parseJobFile(entrypath)
@@ -120,10 +126,12 @@ func (jd *JobDay) Scan(force bool) {
 				os.Exit(1)
 			}
 			jobChan <- *job
-		}(entry, jobChan)
+		}(entry, jobChan, queueChan)
+        <-queueChan
 	}
 	wg.Wait()
 	close(jobChan)
+    close(queueChan)
 	for job := range jobChan {
         if job.JobId == "" {
             continue
