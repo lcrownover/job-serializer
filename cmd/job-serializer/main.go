@@ -41,29 +41,37 @@ import (
 )
 
 type JobDay struct {
-	Filepath   string `json:"filepath"`
-	Date       string `json:"date"`
-	TotalJobs  int    `json:"total_jobs"`
-	ParsedJobs int    `json:"parsed_jobs"`
-	Jobs       []Job  `json:"jobs"`
+	Filepath       string `json:"filepath"`
+	OutputDir      string `json:"output_dir"`
+	OutputFilePath string `json:"output_filepath"`
+	Date           string `json:"date"`
+	TotalJobs      int    `json:"total_jobs"`
+	ParsedJobs     int    `json:"parsed_jobs"`
+	Jobs           []Job  `json:"jobs"`
 }
 
-func NewJobDay(path string) *JobDay {
+func NewJobDay(path string, outputDir string) *JobDay {
 	// get the number of files in the directory
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		writeStderr(err.Error())
 		os.Exit(1)
 	}
+
 	totalJobs := len(entries)
 	datestamp := strings.Split(path, "/")[len(strings.Split(path, "/"))-1]
 	ymd := convertDatestampToYMD(datestamp)
+
+	outputFilePath := outputDir + "/" + ymd + ".json"
+
 	return &JobDay{
-		Filepath:   path,
-		Date:       ymd,
-		TotalJobs:  totalJobs,
-		ParsedJobs: 0,
-		Jobs:       []Job{},
+		Filepath:       path,
+		OutputDir:      outputDir,
+		OutputFilePath: outputFilePath,
+		Date:           ymd,
+		TotalJobs:      totalJobs,
+		ParsedJobs:     0,
+		Jobs:           []Job{},
 	}
 }
 
@@ -78,9 +86,9 @@ func (jd *JobDay) Scan(force bool) {
 		writeStderr(err.Error())
 		os.Exit(1)
 	}
-    // ignore the skip logic if force is used
+	// ignore the skip logic if force is used
 	if !force {
-		df, err := os.Open(jd.Filepath + "/data.json")
+		df, err := os.Open(jd.OutputFilePath)
 		if err != nil {
 			if !os.IsNotExist(err) {
 				writeStderr(err.Error())
@@ -117,6 +125,9 @@ func (jd *JobDay) Scan(force bool) {
 	wg.Wait()
 	close(jobChan)
 	for job := range jobChan {
+        if job.JobId == "" {
+            continue
+        }
 		jd.Jobs = append(jd.Jobs, job)
 		jd.ParsedJobs++
 	}
@@ -124,8 +135,15 @@ func (jd *JobDay) Scan(force bool) {
 
 // Write the JobDay struct to a file
 func (jd *JobDay) Write() {
-	datapath := jd.Filepath + "/data.json"
-	file, err := os.Create(datapath)
+	// create the output directory if it doesn't exist
+	if _, err := os.Stat(jd.OutputFilePath); os.IsNotExist(err) {
+		err := os.MkdirAll(jd.OutputDir, 0700)
+		if err != nil {
+			writeStderr(err.Error())
+			os.Exit(1)
+		}
+	}
+	file, err := os.Create(jd.OutputFilePath)
 	if err != nil {
 		writeStderr(err.Error())
 		os.Exit(1)
@@ -176,10 +194,10 @@ type Job struct {
 	Command         string `json:"command"`
 	WorkDir         string `json:"work_dir"`
 	Power           string `json:"power"`
-    ExcNodeList     string `json:"exc_node_list"`
-    StdErr          string `json:"std_err"`
-    StdIn           string `json:"std_in"`
-    StdOut          string `json:"std_out"`
+	ExcNodeList     string `json:"exc_node_list"`
+	StdErr          string `json:"std_err"`
+	StdIn           string `json:"std_in"`
+	StdOut          string `json:"std_out"`
 }
 
 func parseJobFile(filepath string) (*Job, error) {
@@ -282,14 +300,14 @@ func parseJobFileLine(job *Job, line string) Job {
 			job.NodeList = safeGetProperty(kv)
 		case "BatchHost":
 			job.BatchHost = safeGetProperty(kv)
-        case "StdErr":
-            job.StdErr = safeGetProperty(kv)
-        case "StdIn":
-            job.StdIn = safeGetProperty(kv)
-        case "StdOut":
-            job.StdOut = safeGetProperty(kv)
-        case "ExcNodeList":
-            job.ExcNodeList = safeGetProperty(kv)
+		case "StdErr":
+			job.StdErr = safeGetProperty(kv)
+		case "StdIn":
+			job.StdIn = safeGetProperty(kv)
+		case "StdOut":
+			job.StdOut = safeGetProperty(kv)
+		case "ExcNodeList":
+			job.ExcNodeList = safeGetProperty(kv)
 		}
 	}
 	return *job
@@ -352,12 +370,19 @@ func checkCompleted(dirEntry os.DirEntry) bool { return false }
 
 func main() {
 	var basedirFlag = flag.String("basedir", "", "path to directory containing job directories")
+	var outputdirFlag = flag.String("outputdir", "", "path to directory for output files")
 	var dateFlag = flag.String("date", "", "date to parse in the format YYYY-MM-DD")
 	var forceFlag = flag.Bool("force", false, "force re-parsing of jobs")
 	flag.Parse()
 
 	if *basedirFlag == "" {
 		writeStderr("basedir is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *outputdirFlag == "" {
+		writeStderr("outputdir is required")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -370,7 +395,7 @@ func main() {
 	for _, path := range paths {
 		// entry is a full path to a directory
 		// inside this loop, we waitgroup over all the files in the day
-		jobDay := NewJobDay(path)
+		jobDay := NewJobDay(path, *outputdirFlag)
 		jobDay.Scan(*forceFlag)
 		jobDay.Write()
 	}
