@@ -107,7 +107,7 @@ func (jd *JobDay) Scan(force bool) {
 	}
 
 	fmt.Printf("Parsing %s\n", jd.Filepath)
-	var jobChan = make(chan Job, len(entries))
+	var jobChan = make(chan Job, 8000)
 	var wg sync.WaitGroup
 	for _, entry := range entries {
 		wg.Add(1)
