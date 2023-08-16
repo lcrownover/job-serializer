@@ -80,7 +80,7 @@ func NewJobDay(path string, outputDir string) *JobDay {
 // If it does, skip it
 // Parse the job files in a waitgroup and add them to the Jobs array
 // Increment the ParsedJobs counter
-func (jd *JobDay) Scan(workers int, force bool) {
+func (jd *JobDay) Scan(threads int, force bool) {
 	entries, err := os.ReadDir(jd.Filepath)
 	if err != nil {
 		writeStderr(err.Error())
@@ -109,7 +109,7 @@ func (jd *JobDay) Scan(workers int, force bool) {
 	fmt.Printf("Parsing %s\n", jd.Filepath)
 
 	var jobChan = make(chan Job, len(entries))
-	var queueChan = make(chan struct{}, workers-1)
+	var queueChan = make(chan struct{}, threads-1)
 	var wg sync.WaitGroup
 
 	for _, entry := range entries {
@@ -379,7 +379,7 @@ func main() {
 	var basedirFlag = flag.String("basedir", "", "path to directory containing job directories")
 	var outputdirFlag = flag.String("outputdir", "", "path to directory for output files")
 	var dateFlag = flag.String("date", "", "date to parse in the format YYYY-MM-DD")
-	var workersFlag = flag.Int("workers", 2000, "number of threads to use. max is 10000")
+	var threadsFlag = flag.Int("threads", 2000, "number of threads to use. max is 10000")
 	var forceFlag = flag.Bool("force", false, "force re-parsing of jobs")
 	flag.Parse()
 
@@ -404,7 +404,7 @@ func main() {
 		// entry is a full path to a directory
 		// inside this loop, we waitgroup over all the files in the day
 		jobDay := NewJobDay(path, *outputdirFlag)
-		jobDay.Scan(*workersFlag, *forceFlag)
+		jobDay.Scan(*threadsFlag, *forceFlag)
 		jobDay.Write()
 	}
 }

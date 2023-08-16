@@ -12,7 +12,7 @@ Usage of ./bin/job-serializer:
         force re-parsing of jobs
   -outputdir string
         path to directory for output files
-  -workers int
+  -threads int
         number of threads to use. max is 10000 (default 2000)
 ```
 
