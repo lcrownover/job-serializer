@@ -365,9 +365,6 @@ func getDirPaths(basepath string, ymd string) []string {
 	return validEntries
 }
 
-// returns true if the job has already been parsed successfully into the json file
-func checkCompleted(dirEntry os.DirEntry) bool { return false }
-
 func main() {
 	var basedirFlag = flag.String("basedir", "", "path to directory containing job directories")
 	var outputdirFlag = flag.String("outputdir", "", "path to directory for output files")
