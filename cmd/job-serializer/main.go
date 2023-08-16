@@ -229,6 +229,10 @@ func parseJobFileLine(job *Job, line string) Job {
 		kv := strings.SplitN(pair, "=", 2)
 		switch kv[0] {
 		case "JobId":
+            // if this is the second time seeing the JobID, just return the job
+            if job.JobId != "" {
+                return *job
+            }
 			job.JobId = safeGetProperty(kv)
 		case "JobName":
 			job.JobName = safeGetProperty(kv)
